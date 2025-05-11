@@ -100,6 +100,8 @@ func applyPredicate(p PromQLBuilder, predicate *protos.TPredicate) PromQLBuilder
 		}
 	case *protos.TPredicate_Comparison:
 		return p.applyComparisonPredicate(predicate.GetComparison())
+	case *protos.TPredicate_Regexp:
+		return p.applyRegexpPredicate(predicate.GetRegexp())
 	default:
 		p.predicateErrors = append(p.predicateErrors, fmt.Errorf("%w, type: %T", common.ErrUnimplementedPredicateType, pred))
 	}
@@ -134,6 +136,24 @@ func (p PromQLBuilder) applyComparisonPredicate(c *protos.TPredicate_TComparison
 		p.predicateErrors = append(p.predicateErrors, fmt.Errorf("apply comparison predicate: %w", common.ErrUnsupportedExpression))
 		return p
 	}
+}
+
+func (p PromQLBuilder) applyRegexpPredicate(r *protos.TPredicate_TRegexp) PromQLBuilder {
+	value, pattern := r.GetValue(), r.GetPattern()
+	if value == nil || pattern == nil || value.GetColumn() == "" ||
+		pattern.GetTypedValue().GetValue() == nil || pattern.GetTypedValue() == nil ||
+		pattern.GetTypedValue().Type.GetTypeId() != Ydb.Type_STRING {
+		p.predicateErrors = append(p.predicateErrors, fmt.Errorf("get regexp predicate: %w", common.ErrInvalidRequest))
+		return p
+	}
+
+	p.labelMatchers = append(p.labelMatchers, &labels.Matcher{
+		Type:  labels.MatchRegexp,
+		Name:  value.GetColumn(),
+		Value: pattern.GetTypedValue().GetValue().GetTextValue(),
+	})
+
+	return p
 }
 
 func (p PromQLBuilder) applyTimestampExpr(op protos.TPredicate_TComparison_EOperation, value *Ydb.TypedValue) PromQLBuilder {

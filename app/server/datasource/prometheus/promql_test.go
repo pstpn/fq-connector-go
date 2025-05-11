@@ -170,6 +170,36 @@ func TestWithYdbWhereInvalidComparison(t *testing.T) {
 	assert.ErrorIs(t, err, common.ErrInvalidRequest)
 }
 
+func TestWithYdbWhereInvalidRegexp(t *testing.T) {
+	logger := common.NewTestLogger(t)
+	where := &api_service_protos.TSelect_TWhere{
+		FilterTyped: &api_service_protos.TPredicate{
+			Payload: &api_service_protos.TPredicate_Regexp{
+				Regexp: &api_service_protos.TPredicate_TRegexp{
+					Value:   &api_service_protos.TExpression{Payload: &api_service_protos.TExpression_Cast{}},
+					Pattern: &api_service_protos.TExpression{Payload: &api_service_protos.TExpression_Cast{}},
+				},
+			},
+		},
+	}
+
+	//
+	// Without filtering mandatory parsing
+	//
+	_, err := prometheus.NewPromQLBuilder(logger).
+		WithYdbWhere(where, 0)
+
+	assert.ErrorIs(t, err, common.ErrInvalidRequest)
+
+	//
+	// With filtering mandatory parsing
+	//
+	_, err = prometheus.NewPromQLBuilder(logger).
+		WithYdbWhere(where, api_service_protos.TReadSplitsRequest_FILTERING_MANDATORY)
+
+	assert.ErrorIs(t, err, common.ErrInvalidRequest)
+}
+
 func TestWithYdbWhereUnsupportedExpression(t *testing.T) {
 	logger := common.NewTestLogger(t)
 	where := &api_service_protos.TSelect_TWhere{
@@ -209,7 +239,7 @@ func TestWithYdbWhereUnsupportedExpression(t *testing.T) {
 	assert.ErrorIs(t, err, common.ErrUnsupportedExpression)
 }
 
-func TestWithYdbWhereOneExpression(t *testing.T) {
+func TestWithYdbWhereCorrectComparison(t *testing.T) {
 	logger := common.NewTestLogger(t)
 	timestamp := time.UnixMilli(1744537552067)
 
@@ -256,6 +286,65 @@ func TestWithYdbWhereOneExpression(t *testing.T) {
 	assert.Nil(t, pbQuery.GetHints())
 	assert.Zero(t, pbQuery.GetStartTimestampMs())
 	assert.Equal(t, timestamp.UnixMilli(), pbQuery.GetEndTimestampMs())
+}
+
+func TestWithYdbWhereCorrectRegexp(t *testing.T) {
+	logger := common.NewTestLogger(t)
+
+	where := &api_service_protos.TSelect_TWhere{
+		FilterTyped: &api_service_protos.TPredicate{
+			Payload: &api_service_protos.TPredicate_Regexp{
+				Regexp: &api_service_protos.TPredicate_TRegexp{
+					Value:   utils.NewColumnExpression("test"),
+					Pattern: utils.NewStringValueExpression(`.*pattern\b`),
+				},
+			},
+		},
+	}
+
+	//
+	// Without filtering mandatory parsing
+	//
+	builder, err := prometheus.NewPromQLBuilder(logger).
+		WithYdbWhere(where, 0)
+
+	assert.NoError(t, err)
+
+	pbQuery, err := builder.ToQuery()
+
+	assert.NoError(t, err)
+	assert.Nil(t, pbQuery.GetHints())
+	assert.Zero(t, pbQuery.GetStartTimestampMs())
+	assert.Greater(t, pbQuery.GetEndTimestampMs(), time.Now().UnixMilli())
+	assert.NotNil(t, pbQuery.GetMatchers())
+	assert.Len(t, pbQuery.GetMatchers(), 1)
+	assert.Equal(t, &prompb.LabelMatcher{
+		Type:  prompb.LabelMatcher_RE,
+		Name:  "test",
+		Value: `.*pattern\b`,
+	}, pbQuery.GetMatchers()[0])
+
+	//
+	// With filtering mandatory parsing
+	//
+	builder, err = prometheus.NewPromQLBuilder(logger).
+		WithYdbWhere(where, api_service_protos.TReadSplitsRequest_FILTERING_MANDATORY)
+
+	assert.NoError(t, err)
+
+	pbQuery, err = builder.ToQuery()
+
+	assert.NoError(t, err)
+	assert.Nil(t, pbQuery.GetHints())
+	assert.Zero(t, pbQuery.GetStartTimestampMs())
+	assert.Greater(t, pbQuery.GetEndTimestampMs(), time.Now().UnixMilli())
+	assert.NotNil(t, pbQuery.GetMatchers())
+	assert.Len(t, pbQuery.GetMatchers(), 1)
+	assert.Equal(t, &prompb.LabelMatcher{
+		Type:  prompb.LabelMatcher_RE,
+		Name:  "test",
+		Value: `.*pattern\b`,
+	}, pbQuery.GetMatchers()[0])
 }
 
 func TestWithYdbWhereFullExpression(t *testing.T) {
